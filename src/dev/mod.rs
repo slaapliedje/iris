@@ -14,6 +14,7 @@ pub mod eeprom_93c56;
 pub mod hal2;
 pub mod hpc3;
 pub mod ioc;
+pub mod ip30;
 pub mod mc;
 pub mod mc_vdma;
 pub mod mem;

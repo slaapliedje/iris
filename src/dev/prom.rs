@@ -73,6 +73,22 @@ impl Prom {
         )
     }
 
+    /// IP30 (Octane): the configured path, then `IP30prom.bin` in the
+    /// current directory (as `/usr/cpu/firmware/IP30prom.bin` on IRIX). No
+    /// image is embedded; without one the machine cannot start.
+    pub fn from_file_ip30(cfg_path: &str) -> Self {
+        for path in [cfg_path, "IP30prom.bin"] {
+            if path.is_empty() {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(path) {
+                println!("Loaded IP30 PROM from {}", path);
+                return Self::from_bytes(&bytes);
+            }
+        }
+        panic!("IP30 needs a PROM image: set `prom` to an IP30prom.bin");
+    }
+
     fn from_file_or_embedded_indigo2(
         cfg_path: &str, default_path: &str, embedded: &[u8], profile: &str,
     ) -> Self {

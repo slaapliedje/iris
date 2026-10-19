@@ -356,7 +356,7 @@ pub trait SerialBackend: Send + Sync {
 
 /// Drops TX bytes and never yields RX. Used as a placeholder when a channel
 /// isn't wired to a host I/O source (e.g. CI mode unused channel).
-struct NullBackend;
+pub struct NullBackend;
 
 impl SerialBackend for NullBackend {
     fn send_byte(&self, _byte: u8) {}
@@ -673,6 +673,12 @@ impl Z85c30 {
     /// serial console on Indy). Same constraint as `set_backend_a`.
     pub fn set_backend_b(&self, backend: Arc<dyn SerialBackend>) {
         *self.backend_b.lock() = backend;
+    }
+
+    /// Read the currently-installed backend for channel A. IP30 hands both
+    /// of the SCC's backends to the IOC3's UARTs, which own the ports there.
+    pub fn backend_a(&self) -> Arc<dyn SerialBackend> {
+        self.backend_a.lock().clone()
     }
 
     /// Read the currently-installed backend for channel B.  Used by

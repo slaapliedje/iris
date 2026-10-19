@@ -396,6 +396,10 @@ pub enum MachineProfile {
     /// Use an IMPACT board (`src/dev/mgras/`): an IP28 kernel carries no
     /// Newport driver, so REX3 is not an alternative for that guest.
     Indigo2Ip28,
+    /// SGI Octane IP30 — an R10000 behind HEART, with Xbow, Bridge and IOC3
+    /// instead of MC/HPC3/IOC (`src/dev/ip30.rs`). Bring-up: the PROM only,
+    /// so not in `ALL` yet. Needs an IP30 PROM image in `prom`.
+    OctaneIp30,
 }
 
 impl MachineProfile {
@@ -408,6 +412,7 @@ impl MachineProfile {
             Self::IndyIp24 => "SGI Indy (IP24)",
             Self::Indigo2Ip22 => "SGI Indigo2 (IP22)",
             Self::Indigo2Ip28 => "SGI Indigo2 IMPACT (IP28)",
+            Self::OctaneIp30 => "SGI Octane (IP30)",
         }
     }
 
@@ -420,6 +425,11 @@ impl MachineProfile {
     /// fullhouse devices — see the variant's own documentation for the list.
     pub fn ip28(self) -> bool {
         matches!(self, Self::Indigo2Ip28)
+    }
+
+    /// The Octane: HEART and XIO in place of the MC and GIO.
+    pub fn ip30(self) -> bool {
+        matches!(self, Self::OctaneIp30)
     }
 }
 
@@ -1085,6 +1095,13 @@ pub struct MachineConfig {
     #[serde(default = "default_nveeprom")]
     pub nveeprom: String,
 
+    /// Octane (IP30): where the PROM flash is kept. Its last 64 KB segment
+    /// holds the PROM's own data (PDS), which it rewrites, so the flash is
+    /// a copy of `prom` made on first start and kept here after. Empty: the
+    /// flash lives in memory only and every start is from `prom`.
+    #[serde(default)]
+    pub flash: String,
+
     /// RAM bank sizes in MB. Valid values: 0 (absent), 8, 16, 32, 64, 128.
     #[serde(default = "default_banks")]
     pub banks: [u32; 4],
@@ -1340,6 +1357,7 @@ impl Default for MachineConfig {
             prom: default_prom(),
             nvram: default_nvram(),
             nveeprom: default_nveeprom(),
+            flash: String::new(),
             banks: default_banks(),
             scsi: default_scsi(),
             scale: default_scale(),
@@ -1461,7 +1479,10 @@ impl MachineConfig {
             return Err(format!("scale {} is invalid (valid: 1, 2, 3, 4)", self.scale));
         }
         for (i, &sz) in self.banks.iter().enumerate() {
-            if !VALID_BANK_SIZES.contains(&sz) {
+            // 1 GB banks are the Octane's alone (see dev/ip30.rs: what its
+            // PROM can size).
+            let ip30_bank = self.machine.profile.ip30() && sz == 1024;
+            if !VALID_BANK_SIZES.contains(&sz) && !ip30_bank {
                 return Err(format!(
                     "bank{} size {} MB is invalid (valid: {:?})",
                     i, sz, VALID_BANK_SIZES
@@ -1469,7 +1490,7 @@ impl MachineConfig {
             }
             // The IP22/IP24 MC cannot express banks larger than 128 MB at its base
             // shift; only the IP28's can.
-            if sz > 128 && !self.machine.profile.ip28() {
+            if sz > 128 && !self.machine.profile.ip28() && !self.machine.profile.ip30() {
                 return Err(format!(
                     "bank{} size {} MB needs the IP28 (machine.profile = indigo2_ip28)",
                     i, sz

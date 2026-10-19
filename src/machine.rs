@@ -306,7 +306,8 @@ impl Machine {
         // divider it programs. The generic 33 MHz Count and 50 MHz MC made
         // UST run at a third of real time (Quake in slow motion) and the
         // cycle counter at a quarter.
-        let ip28_count_hz: Option<u64> = if cfg.machine.profile.ip28() {
+        let ip30 = cfg.machine.profile.ip30();
+        let ip28_count_hz: Option<u64> = if cfg.machine.profile.ip28() || ip30 {
             Some(clock_fixed_mhz.map_or(IP28_COUNT_HZ, |mhz| (mhz * 1_000_000.0) as u64))
         } else {
             None
@@ -327,7 +328,9 @@ impl Machine {
 
         // PROM (1MB at 0x1FC00000). Each profile has its own embedded fallback.
         // Indigo2 also tries its profile's default filename after cfg.prom.
-        let prom = if cfg.machine.profile.ip28() {
+        let prom = if ip30 {
+            Prom::from_file_ip30(&cfg.prom)
+        } else if cfg.machine.profile.ip28() {
             Prom::from_file_or_embedded_ip28(&cfg.prom)
         } else if guinness {
             Prom::from_file_or_embedded(&cfg.prom)
@@ -680,8 +683,33 @@ impl Machine {
             mc.clone(),
             hpc3.clone(),
             prom_port,
-            cfg.machine.profile.ip28(),
+            cfg.machine.profile.ip28() || ip30,
         );
+        let mut phys_raw = phys_raw;
+
+        // Octane: the IOC3's UARTs take over the SCC's two host ports (the
+        // console, tty1, is UART A on the SCC's channel-B port), and the SCC,
+        // unmapped here, gets nothing.
+        let ip30_dev = if ip30 {
+            let null: Arc<dyn crate::dev::z85c30::SerialBackend> = Arc::new(crate::dev::z85c30::NullBackend);
+            let console = ioc.scc().backend_b();
+            let aux = ioc.scc().backend_a();
+            ioc.scc().set_backend_a(null.clone());
+            ioc.scc().set_backend_b(null);
+            let image = std::fs::read(if cfg.prom.is_empty() { "IP30prom.bin" } else { &cfg.prom })
+                .unwrap_or_default();
+            let path = (!cfg.flash.is_empty()).then(|| std::path::PathBuf::from(&cfg.flash));
+            let flash = crate::dev::ip30::Flash::new(&image, path);
+            let rtc = crate::dev::ip30::Ds1687::new(
+                (!cfg.nvram.is_empty()).then(|| std::path::PathBuf::from(&cfg.nvram)));
+            let dev = Arc::new(crate::dev::ip30::Ip30::new(
+                cfg.banks, flash, rtc, cfg.network().mac, console, aux));
+            dev.set_timer_manager(timer_manager.clone());
+            phys_raw.set_ip30(dev.clone());
+            Some(dev)
+        } else {
+            None
+        };
 
         // Wrap Physical in Arc
         let phys = Arc::new(phys_raw);
@@ -713,6 +741,16 @@ impl Machine {
             let (memcfg0, memcfg1) = mc.get_memcfg();
             let addrs = mc.parse_memcfg(memcfg0, memcfg1);
             unsafe { (*phys_ptr).remap_banks(addrs); }
+        }
+
+        // Octane: RAM is where HEART's MEMCFG puts it.
+        if let Some(dev) = &ip30_dev {
+            let phys_ptr = PhysPtr(Arc::as_ptr(&phys) as *mut Physical);
+            dev.set_memcfg_callback(Box::new(move |addrs| {
+                unsafe { (*phys_ptr.get()).remap_banks(addrs); }
+            }));
+            let phys_ptr = Arc::as_ptr(&phys) as *mut Physical;
+            unsafe { (*phys_ptr).remap_banks(dev.heart.bank_map()); }
         }
         
         // Connect HPC3 to System Memory (via Physical)
@@ -827,7 +865,11 @@ impl Machine {
         // Connect CPU to MC and IOC for signaling
         let cpu_device: Arc<dyn Device> = cpu.clone().as_device();
         mc.set_cpu(Arc::downgrade(&cpu_device));
-        ioc.set_interrupts(cpu.interrupts_ptr());
+        if let Some(dev) = &ip30_dev {
+            dev.set_interrupts(cpu.interrupts_ptr());
+        } else {
+            ioc.set_interrupts(cpu.interrupts_ptr());
+        }
 
         // ppmem: hand the CPU's inline bitmap field to the memory space, so a
         // MEMCFG remap publishes straight into the object the CPU executes out

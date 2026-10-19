@@ -325,6 +325,9 @@ pub struct Physical {
     /// Bare-metal test device (`--test-device`), in GIO expansion slot 0.
     pub testdev: Option<Arc<crate::dev::testdev::TestDevice>>,
     pub vino: Vino,
+    /// The Octane's chipset. When present it replaces the MC, HPC3, VINO
+    /// and GIO map entirely; the Indigo2 devices stay built but unmapped.
+    pub ip30: Option<Arc<crate::dev::ip30::Ip30>>,
     mc: MemoryController,
     hpc3: Hpc3,
     prom: PromPort,
@@ -478,6 +481,7 @@ impl Physical {
             ultra64,
             testdev,
             vino,
+            ip30: None,
             mc,
             hpc3,
             prom,
@@ -498,10 +502,47 @@ impl Physical {
         }
     }
 
+    /// Make this an Octane: map the IP30 chipset instead of the Indigo2's.
+    /// Before `init`. RAM starts at 0x20000000 as on IP28, so pass
+    /// `ip28 = true` to `new` for the alias at physical 0.
+    pub fn set_ip30(&mut self, ip30: Arc<crate::dev::ip30::Ip30>) {
+        self.ip30 = Some(ip30);
+    }
+
     /// Initialize device map after Physical is in final location (e.g., in Arc).
     /// MUST be called before using the Physical bus!
     pub fn init(&mut self) {
-        self.build_device_map();
+        if self.ip30.is_some() {
+            self.build_ip30_device_map();
+        } else {
+            self.build_device_map();
+        }
+    }
+
+    /// The Octane's map: HEART's registers, the 16 widget windows (absent
+    /// widgets bus-error inside `Ip30`), the PROM flash in the Bridge's
+    /// flash window (`Ip30::flash`, not `prom`), and physical 0..16 KB aliased to RAM's start. RAM is placed
+    /// by `remap_banks` from HEART's MEMCFG.
+    fn build_ip30_device_map(&mut self) {
+        use crate::dev::ip30::{HEART_PIU_BASE, HEART_PIU_END, WIDGET_SPACE_BASE, WIDGET_SPACE_END};
+        let cpu_err_ptr: *const dyn BusDevice = &self.cpu_bus_error;
+        let ip30_ptr: *const dyn BusDevice = &**self.ip30.as_ref().unwrap();
+        let prom_ptr: *const dyn BusDevice = &self.ip30.as_ref().unwrap().flash;
+        for i in 0..65536usize {
+            self.device_map[i] = cpu_err_ptr;
+        }
+        for i in (HEART_PIU_BASE >> 16)..(HEART_PIU_END >> 16) {
+            self.device_map[i as usize] = ip30_ptr;
+        }
+        for i in (WIDGET_SPACE_BASE >> 16)..(WIDGET_SPACE_END >> 16) {
+            self.device_map[i as usize] = ip30_ptr;
+        }
+        for i in (PROM_BASE >> 16)..((PROM_END - 1) >> 16) + 1 {
+            self.device_map[i as usize] = prom_ptr;
+        }
+        self.alias_bus.target = self as *const Physical as *const dyn BusDevice;
+        let alias_ptr: *const dyn BusDevice = &self.alias_bus;
+        self.device_map[(ALIAS_BASE >> 16) as usize] = alias_ptr;
     }
 
     fn build_device_map(&mut self) {
@@ -746,7 +787,16 @@ impl Physical {
         // non-atomic 16-byte fat pointer; see `plan_bank_slots`.
         let (plan, outside) = plan_bank_slots(&bank_addrs, &self.banks_outside_windows);
         self.banks_outside_windows = outside;
+        // The Octane has HEART and widget windows inside what is lomem on
+        // the Indigo2: those slots are never RAM there.
+        let ip30_io = self.ip30.as_ref().map(|_| {
+            use crate::dev::ip30::{HEART_PIU_BASE, WIDGET_SPACE_END};
+            (HEART_PIU_BASE >> 16)..(WIDGET_SPACE_END >> 16)
+        });
         for (idx, target) in plan {
+            if ip30_io.as_ref().is_some_and(|r| r.contains(&idx)) {
+                continue;
+            }
             let ptr = match target {
                 BankSlot::Unmapped => unmapped_ptr,
                 BankSlot::Bank(b) => bank_ptrs[b],
