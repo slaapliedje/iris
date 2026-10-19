@@ -13,6 +13,18 @@ hashes are given where a change is easiest to understand by reading the commit.
 
 ## October 2026
 
+### CPU idle parking
+
+- **An idle-park build no longer hangs IRIX at a raised spl.** The idle
+  detector could park the CPU while the guest was at high spl (IRIX's
+  `splhi` leaves only IP6 unmasked) in a loop waiting for an interrupt
+  handler, and `park` then waited for an unmasked interrupt that never came:
+  the timer's arrived masked, and the guest only takes it once it runs on to
+  `splx`. Seen as an IRIX 6.5.22 Indy going dead (keyboard, serial, telnet)
+  after hours, with the CPU thread idle. The CPU now parks only while
+  nothing is pending and wakes on any pending line, masked or not
+  (`rules/perf/idle-pause-masked-interrupt-must-wake.md`).
+
 ### iris-gui text and languages
 
 - **GUI text was rewritten, and moved into translatable catalogs.** Labels,

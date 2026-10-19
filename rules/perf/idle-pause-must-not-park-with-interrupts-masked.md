@@ -24,3 +24,7 @@ can be delivered at all. Parking needs both.
 
 Easy to miss because `update` already computes `im` for `interrupt_ready`, so
 it reads as though the mask is accounted for.
+
+IM partly clear (a raised spl: IRIX's splhi leaves only IP6) is the same
+trap with a masked line pending: see
+`idle-pause-masked-interrupt-must-wake.md`.

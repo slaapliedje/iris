@@ -6011,4 +6011,126 @@ mod tests {
         assert!(list.contains("write disabled"), "{}", list);
         let _ = std::fs::remove_file(&path);
     }
+
+    /// The kernel pattern that hung a real IRIX 6.5.22 boot after hours:
+    /// a loop that raises the spl (`splhi`: only IP6, the bus error, left
+    /// unmasked on IP22), spins a while, drops it again (`splx`) and tests a
+    /// flag that an interrupt handler sets. Most of each pass is masked, so
+    /// the idle detector sees the repeated state there and parks; the
+    /// timer's interrupt then arrives *masked*. `park` used to wait for
+    /// `ip & im`, which a masked line never satisfies, so the CPU slept
+    /// through the interrupt that would have been taken a few instructions
+    /// later at `splx` - for good. This runs the guest, the 1000-step
+    /// batches and the park exactly as `MipsCpu::start`'s loop does, raises
+    /// IP4 from another thread the way a device does, and requires the loop
+    /// to finish. See rules/perf/idle-pause-masked-interrupt-must-wake.md.
+    #[cfg(feature = "idle-pause")]
+    #[test]
+    fn idle_park_wakes_for_an_interrupt_masked_by_a_raised_spl() {
+        use crate::cpu::idle_park::{parked, wake, IdleParkState, PARK_TEST_LOCK};
+        use crate::cpu::mips_core::{CAUSE_IP4, STATUS_EXL, STATUS_IE, STATUS_IM_SHIFT};
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+
+        const T0: u32 = 8; // flag's address
+        const T1: u32 = 9; // splhi: IE | IM6
+        const T2: u32 = 10; // splx: IE | every IM bit
+        const T3: u32 = 11; // the flag, read
+        const T4: u32 = 12; // 1, for the handler to store
+        const T5: u32 = 13; // the handler's Status: EXL | IE | IM6
+        const STATUS: u32 = 12;
+        const NOPS: u32 = 194; // a pass is NOPS + 6 = 200 instructions:
+                               // 1000-step batches end at one place in it
+        let mtc0 = |rt: u32, rd: u32| (OP_COP0 << 26) | (0x04 << 21) | (rt << 16) | (rd << 11);
+        let lw = |rt: u32, base: u32| (OP_LW << 26) | (base << 21) | (rt << 16);
+        let sw = |rt: u32, base: u32| (OP_SW << 26) | (base << 21) | (rt << 16);
+        let beq = |rs: u32, rt: u32, off: i32| (OP_BEQ << 26) | (rs << 21) | (rt << 16) | (off as u32 & 0xFFFF);
+        let eret = (OP_COP0 << 26) | (RS_TLB << 21) | FUNCT_ERET;
+        let im6 = 1u32 << (STATUS_IM_SHIFT + 6);
+        let loop_pa = 0x1000u64;
+        let done_pa = loop_pa + 4 * (NOPS as u64 + 6);
+        let kseg0 = |pa: u64| 0xFFFF_FFFF_8000_0000u64 | pa;
+
+        struct Ptr(*const AtomicU64);
+        unsafe impl Send for Ptr {}
+
+        let _one = PARK_TEST_LOCK.lock(); // (one parker at a time)
+        let running = std::sync::Arc::new(AtomicBool::new(true));
+        let (ptr_tx, ptr_rx) = channel::<Ptr>();
+        let (done_tx, done_rx) = channel::<Result<u32, u64>>();
+        let run = running.clone();
+        let cpu = std::thread::spawn(move || {
+            let (mut exec, mem) = create_executor();
+            // the loop
+            let mut a = loop_pa;
+            let mut put = |w: u32| { mem.set_word(a, w); a += 4; };
+            put(mtc0(T1, STATUS)); // splhi
+            for _ in 0..NOPS {
+                put(0); // masked: nothing changes, so the state repeats
+            }
+            put(mtc0(T2, STATUS)); // splx: a pending interrupt is taken here
+            put(0);
+            put(lw(T3, T0));
+            put(beq(T3, 0, -(NOPS as i32 + 5)));
+            put(0);
+            put(beq(0, 0, -1)); // done: spin here
+            put(0);
+            // the handler: the flag set, IP4 left masked, back
+            for (k, w) in [sw(T4, T0), mtc0(T5, STATUS), 0, 0, eret, 0].iter().enumerate() {
+                mem.set_word(0x180 + 4 * k as u64, *w);
+            }
+            exec.core.gpr[T0 as usize] = kseg0(0x2000);
+            exec.core.gpr[T1 as usize] = (STATUS_IE | im6) as u64;
+            exec.core.gpr[T2 as usize] = (STATUS_IE | (0xFF << STATUS_IM_SHIFT)) as u64;
+            exec.core.gpr[T4 as usize] = 1;
+            exec.core.gpr[T5 as usize] = (STATUS_EXL | STATUS_IE | im6) as u64;
+            // mid-pass, masked, as a batch would leave it
+            exec.core.cp0_status = STATUS_IE | im6;
+            exec.core.pc = kseg0(loop_pa + 4 * 100);
+            exec.core.cp0_compare = 1; // (park only once a deadline is armed)
+            ptr_tx.send(Ptr(&exec.core.hot.interrupts as *const AtomicU64)).unwrap();
+
+            let mut idle = IdleParkState::default();
+            let mut parks = 0u32;
+            while run.load(Ordering::Relaxed) {
+                for _ in 0..1000 {
+                    exec.step_int();
+                }
+                if exec.core.pc == kseg0(done_pa) || exec.core.pc == kseg0(done_pa + 4) {
+                    done_tx.send(Ok(parks)).unwrap();
+                    return;
+                }
+                if idle.update(&exec.core) {
+                    parks += 1;
+                    idle.park(&mut exec.core, &run);
+                }
+            }
+            done_tx.send(Err(exec.core.pc)).unwrap();
+        });
+
+        let p = ptr_rx.recv().unwrap();
+        // the guest parked in the masked stretch: now the timer
+        let t0 = std::time::Instant::now();
+        while !parked() && t0.elapsed() < Duration::from_secs(5) {
+            std::thread::yield_now();
+        }
+        unsafe { &*p.0 }.fetch_or(CAUSE_IP4 as u64, Ordering::SeqCst);
+        wake();
+        let got = match done_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(r) => r,
+            Err(_) => {
+                running.store(false, Ordering::SeqCst); // let `park` go
+                done_rx.recv_timeout(Duration::from_secs(5)).expect("CPU thread")
+            }
+        };
+        cpu.join().unwrap();
+        match got {
+            Ok(parks) => assert!(parks > 0,
+                "the masked stretch should have been parked in before IP4 came: \
+                 the test isn't exercising the park"),
+            Err(pc) => panic!("still at {pc:#x} 5 s after IP4 was raised: the CPU \
+                               parked through an interrupt masked only by the spl"),
+        }
+    }
 }
