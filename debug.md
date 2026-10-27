@@ -521,6 +521,23 @@ its SCSI controllers answer to `scsi`/`cow` and `scsi1`/`cow1` as described unde
 | `o2 unmapped` | Bus accesses that reached no device (the first 64 distinct), with the PC that made each |
 | `o2 ps2log PATH` / `o2 crimelog PATH` / `o2 nictrace PATH` | PS/2 traffic / recent CRIME interrupt-register accesses / the MAC-address chip's register trace and 1-Wire protocol log |
 
+### SGI Octane (IP30)
+
+The Octane's bus registers one command (the machine is in bring-up; see
+[the address map](docs/Octane/ip30-address-map.md)):
+
+| Command | Description |
+|---|---|
+| `ip30 memcfg` | HEART's four MEMCFG words, the memory fitted, and where each bank sits (base, span, DIMM size) |
+| `ip30 heart` | HEART's counter and compare, interrupt status, CPU 0's interrupt mask, mode register |
+| `ip30 bridge` | The Bridge's interrupt destination, and each of its eight device and interrupt-address registers |
+| `ip30 gfx` | Reads and writes to the graphics widget's register file, with the busiest offsets |
+| `ip30 unmapped` | Bus accesses that reached no device (the first 64 distinct addresses, reads and writes apart) |
+
+`IRIS_IP30_TRACE=1` in the environment logs the first access to each
+register on stderr, and `=2` also every IOC3 access in order; that is how
+the next register to model is found.
+
 ## Recipes
 
 **Stop at a function and look around** (release or developer build):

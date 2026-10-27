@@ -9,9 +9,11 @@
 //! low memory alias, HEART's processor-side registers, the sixteen widget
 //! windows, memory. `ip30_machine` drives it.
 //!
-//! The bus takes 32-bit addresses, as on the other machines. Everything
-//! the PROM and an early kernel touch is below 4 GB; the large and huge
-//! widget windows and memory beyond 4 GB wait for a wider bus.
+//! The CPU hands over 64-bit physical addresses, but this bus decodes
+//! only the low 32 bits: an address above 4 GB is truncated and aliases
+//! whatever sits below. Everything the PROM and an early kernel touch is
+//! below 4 GB; the large and huge widget windows and memory beyond 4 GB
+//! wait for a full decode.
 //!
 //! Set IRIS_IP30_TRACE=1 to log the first access to each register; that
 //! is how the next thing to model gets found.

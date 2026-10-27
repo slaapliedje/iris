@@ -27,7 +27,8 @@ shows memory, HEART, the Bridge and the unmapped accesses.
   mirror, so configure 1024 MB banks. It also probes every bank, so a
   bank with no DIMMs must take writes and read back zero (`Decode::Empty`)
   rather than bus-error; the probe places banks beyond 4 GB for a moment,
-  where the 32-bit bus cannot follow.
+  which `Ip30Bus` does not decode (it truncates addresses to 32 bits, so
+  those accesses alias low memory).
 - *The Bridge's device windows at reset are memory space at base 0.* The
   PROM enables the RAD's memory decode and writes through window 3 with
   neither the RAD's BAR nor device register 3 programmed; the window has
@@ -91,8 +92,9 @@ shows memory, HEART, the Bridge and the unmapped accesses.
 **Not done.** The CPU board NIC check; the keyboard (the PROM polls
 K_RD after writing 0xf2 to K_WD and gives up, which is fine without a
 keyboard); large and huge widget windows (physical 0x8_0000_0000 and up)
-and memory above 4 GB need the bus widened past `u32`, which the O2's
-`phys_alias` trick does not cover; SCSI needs the ISP1040 model
+and memory above 4 GB: upstream's bus is 64 bits wide now (73a1df3), but
+`Ip30Bus` still truncates to `u32` on entry, so it has to decode the full
+address (bus error until something answers) before they open; SCSI needs the ISP1040 model
 (`docs/Octane/qla1040.md`: the PROM's "QL SCSI controller initialization
 failed" is the register file answering its mailbox); Ethernet the IOC3's
 ring DMA; graphics HQ4 in front of the IMPACT emulation (the widget is

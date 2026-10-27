@@ -80,6 +80,25 @@ hashes are given where a change is easiest to understand by reading the commit.
   the guest screen from the display caches when no renderer is present. With
   a GUI renderer attached it still returns the readback that renderer
   produced. (`src/ci.rs`, `src/gfx_display.rs`)
+### SGI Octane (IP30)
+
+- **The Octane, in bring-up.** `[machine] profile = "octane_ip30"` with an
+  `[octane]` section (see [FEATURES.md](FEATURES.md) and the
+  [address map](docs/Octane/ip30-address-map.md)): an R10000 on HEART, the
+  Xbow, and the Bridge with the IOC3 (two serial ports, the DS1687 clock and
+  NVRAM, the MAC-address chip), the boot flash and the board ID chips.
+  PROM 4.17 runs its power-on diagnostics, lists its devices in `hinv`, and
+  reaches the System Maintenance Menu and Command Monitor on the serial
+  console. There is no SCSI, Ethernet or graphics yet, so IRIX does not
+  boot. Needs the Octane PROM image; headless only. `octane.toml.example`
+  is a starting configuration.
+- New monitor command `ip30` (memory layout, HEART, the Bridge, the
+  graphics widget, unmapped accesses) and the `IRIS_IP30_TRACE` diagnostic.
+- Reference documents for the Octane's
+  [QLogic ISP1040 SCSI](docs/Octane/qla1040.md) and
+  [IOC3 Ethernet](docs/Octane/ioc3-ethernet.md), written ahead of their
+  models.
+
 ### SGI O2 (IP32)
 
 - **A new machine: the SGI O2.** `[machine] profile = "o2_ip32"` with an `[o2]`

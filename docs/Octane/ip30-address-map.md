@@ -453,15 +453,17 @@ The Octane is its own machine, like the O2: `src/ip30.rs` is the bus
 | 0x1F70_0000 | device window 3: RAD, a register file |
 | 0x1FC0_0000 – 0x1FDF_FFFF | `dev/sflash.rs`: the flash with its command set; `flash` keeps it between runs so the PDS survives |
 | 0x2000_0000 up | `dev/heart_mem.rs`: the banks as MEMCFG places them, mapped into the CPU's ppmem window |
-| widgets 9, 10, 11, 13, 14; the large and huge windows | bus error |
+| widgets 9, 10, 11, 13, 14 | bus error |
+| 0x1_0000_0000 and up: the large and huge windows, memory beyond 4 GB | not decoded (see below) |
 
-The bus still takes 32-bit addresses, as on the other machines: the
-decode table is 40 bits wide (`docs/devmap-design.md`) but the CPU hands
-the bus `phys as u32`. Everything the PROM and an early kernel touch is
-below 4 GB (the windows, the PROM, RAM up to 3.5 GB), and memory the PROM
-places above 4 GB during its sizing probe is left unmapped. Widening the
-bus is the step that opens the large and huge windows (OpenBSD's console
-goes through the large window) and memory beyond 4 GB.
+The CPU hands the bus full 64-bit physical addresses (see `HACKING.md`),
+but `Ip30Bus` still decodes only their low 32 bits: it truncates each
+address on entry, so an access above 4 GB reaches whatever answers at the
+same low address instead of bus-erroring. Everything the PROM and an early
+kernel touch is below 4 GB (the windows, the PROM, RAM up to 3.5 GB).
+Decoding the full address is the step that opens the large and huge
+windows (OpenBSD's console goes through the large window) and memory
+beyond 4 GB.
 
 What has been seen to work against this map: PROM 4.17 starts in the
 flash, finds HEART, the Xbow and the Bridge, sizes memory, reads the
