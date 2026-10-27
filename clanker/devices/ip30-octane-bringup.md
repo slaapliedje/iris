@@ -95,7 +95,12 @@ and memory above 4 GB need the bus widened past `u32`, which the O2's
 `phys_alias` trick does not cover; SCSI needs the ISP1040 model
 (`docs/Octane/qla1040.md`: the PROM's "QL SCSI controller initialization
 failed" is the register file answering its mailbox); Ethernet the IOC3's
-ring DMA; graphics HQ4 in front of the IMPACT emulation (the widget is
+ring DMA (`docs/Octane/ioc3-ethernet.md`: the chip, what the PROM, IRIX,
+Linux and OpenBSD program, and where the PROM stalled before the model
+came: the reset-idle bit, the PHY probe, and its power-on test's ten
+looped-back frames, sent before it posts a buffer; `ip30-promdrive.py`
+here drives the PROM's console to see such things); graphics HQ4 in
+front of the IMPACT emulation (the widget is
 left off the Xbow's links so the PROM takes the serial console);
 snapshots the usual `Saveable` work.
 
