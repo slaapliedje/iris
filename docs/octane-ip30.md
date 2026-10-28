@@ -106,6 +106,12 @@ The console is IOC3's first serial port on TCP 127.0.0.1 (`serial_port_a`,
 port is `serial_port_b`. The PROM's `console` variable picks between the
 serial and graphics consoles; `headless` only removes the window.
 
+A PS/2 keyboard and mouse are always plugged into IOC3's two PS/2 ports;
+the iris window (or iris-gui) and the monitor's `ps2` commands type and
+move them. The PROM and IRIX run the keyboard in scan code set 3. How the
+controller works and what each driver does with it is in
+[Octane/ioc3-ps2.md](Octane/ioc3-ps2.md).
+
 ## Graphics
 
 The graphics board is Solid IMPACT on widget 11: the same raster chips as
