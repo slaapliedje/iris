@@ -13,6 +13,17 @@ hashes are given where a change is easiest to understand by reading the commit.
 
 ## October 2026
 
+### Interpreter
+
+- **An Indigo2 (IP22, R4400) with an IMPACT board boots again in `lightning`
+  builds (#270).** The PROM panicked during power-on diagnostics
+  (`Exception PC: 0x9fc36988`). Opcode fusion runs an address calculation
+  and the load or store that follows it as one step, and when the device
+  asked for a retry (IMPACT does while it is busy) the fused step raised an
+  exception instead of retrying the load. It now retries the load, as an
+  unfused load does. Builds without `lightning`/`opcodefusion` were not
+  affected. (`src/cpu/mips_exec.rs`)
+
 ### Host efficiency on small machines
 
 - **Threads that have nothing to do now sleep in milliseconds, not
